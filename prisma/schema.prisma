@@ -1,0 +1,707 @@
+// OBE System — PostgreSQL schema (Prisma)
+// UUID primary keys. Every mutable business table carries timestamps.
+// Business rules that Prisma cannot express are enforced in the versioned SQL
+// migration (prisma/migrations) and re-checked in the service layer.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  TUTOR
+  STUDENT
+}
+
+enum OfferingStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum EnrollmentStatus {
+  ENROLLED
+  DROPPED
+  WITHDRAWN
+  COMPLETED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum BloomLevel {
+  REMEMBER
+  UNDERSTAND
+  APPLY
+  ANALYZE
+  EVALUATE
+  CREATE
+}
+
+enum BloomDomain {
+  COGNITIVE
+  PSYCHOMOTOR
+  AFFECTIVE
+}
+
+enum AssessmentType {
+  ASSIGNMENT
+  QUIZ
+  LAB
+  PRESENTATION
+  MID_EXAM
+  PROJECT
+  FINAL_EXAM
+  OTHER
+}
+
+enum AssessmentStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  ARCHIVED
+}
+
+enum LatePolicy {
+  ACCEPT
+  REJECT
+  MARK_LATE
+}
+
+enum SubmissionStatus {
+  SUBMITTED
+  LATE
+  GRADED
+  RETURNED
+}
+
+enum GradeState {
+  GRADED
+  EXCUSED
+  INCOMPLETE
+}
+
+enum AttainmentScope {
+  CLO
+  PLO
+}
+
+enum AttainmentStatus {
+  MET
+  AT_RISK
+  NOT_MET
+  INSUFFICIENT_DATA
+}
+
+enum PlanStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum DeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+}
+
+enum NotificationType {
+  ASSESSMENT_PUBLISHED
+  DEADLINE_APPROACHING
+  GRADE_PUBLISHED
+  ENROLLMENT_CHANGED
+  COURSE_ASSIGNMENT
+  ATTAINMENT_UPDATE
+  IMPROVEMENT_PLAN
+  SYSTEM
+}
+
+model User {
+  id                String    @id @default(uuid()) @db.Uuid
+  email             String    @unique
+  passwordHash      String
+  name              String
+  role              Role
+  departmentId      String?   @db.Uuid
+  employeeNo        String?   @unique
+  phone             String?
+  isActive          Boolean   @default(true)
+  lastLoginAt       DateTime?
+  failedLoginCount  Int       @default(0)
+  lockedUntil       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  department        Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  studentProfile    StudentProfile?
+  refreshTokens     RefreshToken[]
+  tutorOfferings    CourseOffering[] @relation("OfferingTutor")
+  createdClos       Clo[] @relation("CloCreatedBy")
+  approvedClos      Clo[] @relation("CloApprovedBy")
+  createdAssessments Assessment[] @relation("AssessmentCreatedBy")
+  gradedItems       SubmissionItemGrade[] @relation("GradeEnteredBy")
+  gradeChanges      GradeChange[] @relation("GradeChangeActor")
+  attainmentRuns    AttainmentRun[] @relation("AttainmentComputedBy")
+  notifications     Notification[]
+  auditLogs         AuditLog[] @relation("AuditActor")
+  actionPlans       ImprovementActionPlan[] @relation("PlanCreatedBy")
+  createdPolicies   AttainmentPolicy[] @relation("PolicyCreatedBy")
+  materials         CourseMaterial[] @relation("MaterialCreatedBy")
+
+  @@index([role, isActive])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  issuedAt  DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  ip        String?
+
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@map("refresh_tokens")
+}
+
+model Department {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  code      String   @unique
+  hodName   String?
+  contact   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users     User[]
+  programs  Program[]
+
+  @@map("departments")
+}
+
+model Program {
+  id                String   @id @default(uuid()) @db.Uuid
+  departmentId      String   @db.Uuid
+  name              String
+  code              String   @unique
+  creditHours       Int
+  accreditationBody String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  courses    Course[]
+  plos       Plo[]
+  students   StudentProfile[]
+
+  @@index([departmentId])
+  @@map("programs")
+}
+
+model Semester {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  offerings CourseOffering[]
+
+  @@map("semesters")
+}
+
+model Course {
+  id          String   @id @default(uuid()) @db.Uuid
+  programId   String   @db.Uuid
+  code        String
+  title       String
+  description String?
+  creditHours Int
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  program   Program          @relation(fields: [programId], references: [id], onDelete: Restrict)
+  clos      Clo[]
+  offerings CourseOffering[]
+
+  @@unique([programId, code])
+  @@index([programId])
+  @@map("courses")
+}
+
+model CourseOffering {
+  id             String         @id @default(uuid()) @db.Uuid
+  courseId       String         @db.Uuid
+  semesterId     String         @db.Uuid
+  tutorId        String         @db.Uuid
+  sectionName    String
+  status         OfferingStatus @default(PLANNED)
+  reportingPeriod String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  course         Course           @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  semester       Semester         @relation(fields: [semesterId], references: [id], onDelete: Restrict)
+  tutor          User             @relation("OfferingTutor", fields: [tutorId], references: [id], onDelete: Restrict)
+  enrollments    Enrollment[]
+  assessments    Assessment[]
+  attainmentRuns AttainmentRun[]
+  actionPlans    ImprovementActionPlan[]
+  materials      CourseMaterial[]
+
+  @@unique([courseId, semesterId, sectionName])
+  @@index([semesterId])
+  @@index([tutorId])
+  @@map("course_offerings")
+}
+
+model StudentProfile {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @unique @db.Uuid
+  rollNo    String   @unique
+  programId String   @db.Uuid
+  batch     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  program     Program      @relation(fields: [programId], references: [id], onDelete: Restrict)
+  enrollments Enrollment[]
+  submissions Submission[]
+
+  @@index([programId])
+  @@map("student_profiles")
+}
+
+model Enrollment {
+  id         String           @id @default(uuid()) @db.Uuid
+  studentId  String           @db.Uuid
+  offeringId String           @db.Uuid
+  status     EnrollmentStatus @default(ENROLLED)
+  enrolledAt DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  student  StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  offering CourseOffering @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, offeringId])
+  @@index([offeringId, status])
+  @@map("enrollments")
+}
+
+model Clo {
+  id               String         @id @default(uuid()) @db.Uuid
+  courseId         String         @db.Uuid
+  code             String
+  description      String
+  bloomLevel       BloomLevel
+  masteryThreshold Decimal        @default(50) @db.Decimal(5, 2)
+  approvalStatus   ApprovalStatus @default(PENDING)
+  createdById      String         @db.Uuid
+  approvedById     String?        @db.Uuid
+  approvedAt       DateTime?
+  rejectionNote    String?
+  archivedAt       DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  course        Course                @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdBy     User                  @relation("CloCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedBy    User?                 @relation("CloApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  ploMappings   CloPloMapping[]
+  itemMappings  AssessmentItemClo[]
+  attainment    CloAttainment[]
+  actionPlans   ImprovementActionPlan[]
+
+  @@unique([courseId, code])
+  @@index([courseId, approvalStatus])
+  @@map("clos")
+}
+
+model Plo {
+  id               String      @id @default(uuid()) @db.Uuid
+  programId        String      @db.Uuid
+  code             String
+  description      String
+  bloomDomain      BloomDomain
+  accreditationRef String?
+  targetAttainment Decimal     @default(65) @db.Decimal(5, 2)
+  isActive         Boolean     @default(true)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  program     Program          @relation(fields: [programId], references: [id], onDelete: Cascade)
+  cloMappings CloPloMapping[]
+  attainment  PloAttainment[]
+
+  @@unique([programId, code])
+  @@index([programId])
+  @@map("plos")
+}
+
+model CloPloMapping {
+  id        String   @id @default(uuid()) @db.Uuid
+  cloId     String   @db.Uuid
+  ploId     String   @db.Uuid
+  weight    Int      @default(3)
+  createdAt DateTime @default(now())
+
+  clo Clo @relation(fields: [cloId], references: [id], onDelete: Cascade)
+  plo Plo @relation(fields: [ploId], references: [id], onDelete: Cascade)
+
+  @@unique([cloId, ploId])
+  @@index([ploId])
+  @@map("clo_plo_mappings")
+}
+
+model Assessment {
+  id                 String           @id @default(uuid()) @db.Uuid
+  offeringId         String           @db.Uuid
+  title              String
+  type               AssessmentType
+  instructions       String?
+  maxMarks           Decimal          @db.Decimal(7, 2)
+  passingMarks       Decimal?         @db.Decimal(7, 2)
+  submissionFormat   String?
+  latePolicy         LatePolicy       @default(MARK_LATE)
+  dueAt              DateTime?
+  publishedAt        DateTime?
+  resultsPublishedAt DateTime?
+  status             AssessmentStatus @default(DRAFT)
+  createdById        String           @db.Uuid
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  offering  CourseOffering @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+  createdBy User           @relation("AssessmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  items     AssessmentItem[]
+  submissions Submission[]
+
+  @@index([offeringId, status])
+  @@map("assessments")
+}
+
+model AssessmentItem {
+  id           String   @id @default(uuid()) @db.Uuid
+  assessmentId String   @db.Uuid
+  label        String
+  prompt       String?
+  maxMarks     Decimal  @db.Decimal(7, 2)
+  position     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assessment Assessment          @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  cloMappings AssessmentItemClo[]
+  grades      SubmissionItemGrade[]
+  rubricCriteria RubricCriterion[]
+  gradeChanges GradeChange[]
+
+  @@unique([assessmentId, label])
+  @@index([assessmentId])
+  @@map("assessment_items")
+}
+
+model AssessmentItemClo {
+  id     String @id @default(uuid()) @db.Uuid
+  itemId String @db.Uuid
+  cloId  String @db.Uuid
+  // Relative contribution of this item to the CLO. Positive, service-validated.
+  weight Decimal @default(1) @db.Decimal(7, 3)
+
+  item AssessmentItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  clo  Clo            @relation(fields: [cloId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, cloId])
+  @@index([cloId])
+  @@map("assessment_item_clos")
+}
+
+model Submission {
+  id           String           @id @default(uuid()) @db.Uuid
+  assessmentId String           @db.Uuid
+  studentId    String           @db.Uuid
+  content      String?
+  attachmentUrl String?
+  status       SubmissionStatus @default(SUBMITTED)
+  submittedAt  DateTime         @default(now())
+  isLate       Boolean          @default(false)
+  overallFeedback String?
+  gradedAt     DateTime?
+  returnedAt   DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  assessment Assessment            @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  student    StudentProfile        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  grades     SubmissionItemGrade[]
+  criterionGrades SubmissionCriterionGrade[]
+  gradeChanges GradeChange[]
+
+  @@unique([assessmentId, studentId])
+  @@index([studentId])
+  @@map("submissions")
+}
+
+model SubmissionItemGrade {
+  id           String   @id @default(uuid()) @db.Uuid
+  submissionId String   @db.Uuid
+  itemId       String   @db.Uuid
+  marks        Decimal  @db.Decimal(7, 2)
+  state        GradeState @default(GRADED)
+  feedback     String?
+  gradedById   String   @db.Uuid
+  gradedAt     DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  submission Submission     @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  item       AssessmentItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  gradedBy   User           @relation("GradeEnteredBy", fields: [gradedById], references: [id], onDelete: Restrict)
+
+  @@unique([submissionId, itemId])
+  @@index([itemId])
+  @@map("submission_item_grades")
+}
+
+model AttainmentPolicy {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String
+  version       String   @unique
+  description   String?
+  config        Json
+  isActive      Boolean  @default(false)
+  createdById   String   @db.Uuid
+  createdAt     DateTime @default(now())
+
+  createdBy User             @relation("PolicyCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  runs      AttainmentRun[]
+
+  @@map("attainment_policies")
+}
+
+model AttainmentRun {
+  id               String   @id @default(uuid()) @db.Uuid
+  offeringId       String   @db.Uuid
+  policyId         String   @db.Uuid
+  engineVersion    String
+  policyVersion    String
+  policySnapshot   Json
+  reportingPeriod  String
+  computedAt       DateTime @default(now())
+  computedById     String?  @db.Uuid
+  isFrozen         Boolean  @default(false)
+  frozenAt         DateTime?
+  notes            String?
+
+  offering    CourseOffering @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+  policy      AttainmentPolicy @relation(fields: [policyId], references: [id], onDelete: Restrict)
+  computedBy  User?          @relation("AttainmentComputedBy", fields: [computedById], references: [id], onDelete: SetNull)
+  cloResults  CloAttainment[]
+  ploResults  PloAttainment[]
+
+  @@index([offeringId, computedAt])
+  @@map("attainment_runs")
+}
+
+model CloAttainment {
+  id                  String           @id @default(uuid()) @db.Uuid
+  runId               String           @db.Uuid
+  cloId               String           @db.Uuid
+  cohortSize          Int
+  eligibleCount       Int
+  attainedCount       Int
+  meanScore           Decimal          @db.Decimal(6, 2)
+  attainmentPct       Decimal          @db.Decimal(6, 2)
+  targetPct           Decimal          @db.Decimal(6, 2)
+  status              AttainmentStatus
+  missingEvidenceCount Int             @default(0)
+  evidenceJson        Json?
+
+  run AttainmentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  clo Clo           @relation(fields: [cloId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, cloId])
+  @@index([cloId])
+  @@map("clo_attainment")
+}
+
+model PloAttainment {
+  id                 String           @id @default(uuid()) @db.Uuid
+  runId              String           @db.Uuid
+  ploId              String           @db.Uuid
+  attainmentPct      Decimal          @db.Decimal(6, 2)
+  targetPct          Decimal          @db.Decimal(6, 2)
+  status             AttainmentStatus
+  contributingClos   Int
+  weightedCohort     Decimal          @db.Decimal(12, 2)
+  evidenceJson       Json?
+
+  run AttainmentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  plo Plo           @relation(fields: [ploId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, ploId])
+  @@index([ploId])
+  @@map("plo_attainment")
+}
+
+model Notification {
+  id              String           @id @default(uuid()) @db.Uuid
+  userId          String           @db.Uuid
+  type            NotificationType @default(SYSTEM)
+  title           String
+  body            String
+  link            String?
+  readAt          DateTime?
+  deliveryStatus  DeliveryStatus   @default(PENDING)
+  deliveredAt     DateTime?
+  deliveryError   String?
+  dedupeKey       String?          @unique
+  createdAt       DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@index([deliveryStatus])
+  @@map("notifications")
+}
+
+model ImprovementActionPlan {
+  id           String     @id @default(uuid()) @db.Uuid
+  offeringId   String     @db.Uuid
+  cloId        String?    @db.Uuid
+  createdById  String     @db.Uuid
+  title        String
+  description  String
+  gapDescription String?
+  followUp     String?
+  status       PlanStatus @default(OPEN)
+  dueDate      DateTime?  @db.Date
+  evaluation   String?
+  evaluatedAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  offering CourseOffering @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+  clo      Clo?           @relation(fields: [cloId], references: [id], onDelete: SetNull)
+  createdBy User          @relation("PlanCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([offeringId, status])
+  @@map("improvement_action_plans")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @db.Uuid
+  actorEmail String?
+  action     String
+  entityType String
+  entityId   String?
+  ip         String?
+  userAgent  String?
+  requestId  String?
+  metadata   Json?
+  occurredAt DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId, occurredAt])
+  @@index([actorId, occurredAt])
+  @@index([occurredAt])
+  @@map("audit_logs")
+}
+
+
+model RubricCriterion {
+  id          String   @id @default(uuid()) @db.Uuid
+  itemId      String   @db.Uuid
+  label       String
+  description String?
+  maxMarks    Decimal  @db.Decimal(7, 2)
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  item   AssessmentItem            @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  grades SubmissionCriterionGrade[]
+
+  @@unique([itemId, label])
+  @@index([itemId])
+  @@map("rubric_criteria")
+}
+
+model SubmissionCriterionGrade {
+  id           String   @id @default(uuid()) @db.Uuid
+  submissionId String   @db.Uuid
+  criterionId  String   @db.Uuid
+  marks        Decimal  @db.Decimal(7, 2)
+  feedback     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  submission Submission      @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  criterion  RubricCriterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, criterionId])
+  @@index([criterionId])
+  @@map("submission_criterion_grades")
+}
+
+
+model CourseMaterial {
+  id          String   @id @default(uuid()) @db.Uuid
+  offeringId  String   @db.Uuid
+  title       String
+  description String?
+  url         String
+  isPublished Boolean  @default(false)
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  offering  CourseOffering @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+  createdBy User           @relation("MaterialCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([offeringId, isPublished])
+  @@map("course_materials")
+}
+
+// Immutable trail of every consequential grade change. A regrade never silently
+// overwrites a published mark: the previous value, new value, actor, timestamp
+// and reason are retained here and mirrored to the audit log.
+model GradeChange {
+  id            String   @id @default(uuid()) @db.Uuid
+  submissionId  String   @db.Uuid
+  itemId        String?  @db.Uuid
+  actorId       String?  @db.Uuid
+  previousMarks Decimal? @db.Decimal(7, 2)
+  newMarks      Decimal  @db.Decimal(7, 2)
+  reason        String?
+  createdAt     DateTime @default(now())
+
+  submission Submission      @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  item       AssessmentItem? @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  actor      User?           @relation("GradeChangeActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([submissionId, createdAt])
+  @@index([itemId])
+  @@map("grade_changes")
+}
