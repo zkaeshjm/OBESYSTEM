@@ -420,7 +420,7 @@ router.post(
     if (offering.status === 'ARCHIVED') throw conflict('Cannot enrol students in an archived offering');
 
     const students = await prisma.studentProfile.findMany({
-      where: { id: { in: req.body.studentIds }, isActive: true },
+      where: { id: { in: req.body.studentIds }, isActive: true, user: { isActive: true } },
       include: { user: { select: { id: true, name: true, isActive: true } } },
     });
     if (students.length !== new Set(req.body.studentIds).size) {
