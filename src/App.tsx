@@ -4,6 +4,7 @@ import Layout from './components/Layout';
 import { Loading } from './components/ui';
 import type { Role } from './api/types';
 import Login from './pages/Login';
+import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Departments from './pages/Departments';
 import Programs from './pages/Programs';
@@ -21,6 +22,7 @@ import Profile from './pages/Profile';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
 import Users from './pages/Users';
+import RegistrationRequests from './pages/RegistrationRequests';
 import AuditLog from './pages/AuditLog';
 import Policies from './pages/Policies';
 import NotFound from './pages/NotFound';
@@ -62,6 +64,20 @@ export default function App() {
           )
         }
       />
+      <Route
+        path="/register"
+        element={
+          loading ? (
+            <div className="flex min-h-screen items-center justify-center">
+              <Loading />
+            </div>
+          ) : user ? (
+            <Navigate to="/" replace />
+          ) : (
+            <Register />
+          )
+        }
+      />
       <Route element={<RequireAuth />}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/departments" element={<RoleRoute roles={['ADMIN']}><Departments /></RoleRoute>} />
@@ -80,6 +96,7 @@ export default function App() {
         <Route path="/profile" element={<Profile />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/users" element={<RoleRoute roles={['ADMIN']}><Users /></RoleRoute>} />
+        <Route path="/registration-requests" element={<RoleRoute roles={['ADMIN']}><RegistrationRequests /></RoleRoute>} />
         <Route path="/audit" element={<RoleRoute roles={['ADMIN']}><AuditLog /></RoleRoute>} />
         <Route path="/policies" element={<RoleRoute roles={['ADMIN']}><Policies /></RoleRoute>} />
         <Route path="*" element={<NotFound />} />

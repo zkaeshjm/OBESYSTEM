@@ -10,7 +10,7 @@ import { notify } from '../lib/notify.js';
 import { hashPassword } from '../lib/password.js';
 import { readPagination, sendData, sendPaginated } from '../lib/http.js';
 import { getStudentProfileId } from '../lib/authorization.js';
-import type { Prisma, Role } from '@prisma/client';
+import type { ApprovalStatus, Prisma, Role } from '@prisma/client';
 
 const router = Router();
 router.use(authenticate);
@@ -520,6 +520,183 @@ router.post(
     ]);
     await audit(req, { action: 'UPDATE', entityType: 'User', entityId: String(req.params.id), metadata: { field: 'password_reset' } });
     return sendData(res, { ok: true });
+  })
+);
+
+/* ------------------------------------------------------------------ */
+/* Registration requests (self sign-up awaiting administrator review)  */
+/* ------------------------------------------------------------------ */
+const registrationSelect = {
+  id: true,
+  name: true,
+  email: true,
+  role: true,
+  employeeNo: true,
+  rollNo: true,
+  batch: true,
+  departmentId: true,
+  programId: true,
+  status: true,
+  decisionNote: true,
+  reviewedAt: true,
+  createdAt: true,
+  department: { select: { id: true, name: true, code: true } },
+  program: { select: { id: true, name: true, code: true } },
+  reviewedBy: { select: { id: true, name: true } },
+} as const;
+
+router.get(
+  '/registration-requests',
+  adminOnly,
+  asyncHandler(async (req, res) => {
+    const pagination = readPagination(req.query as Record<string, unknown>);
+    const statusQuery = req.query.status;
+    const status: ApprovalStatus | undefined =
+      statusQuery === 'PENDING' || statusQuery === 'APPROVED' || statusQuery === 'REJECTED'
+        ? statusQuery
+        : undefined;
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const where: Prisma.RegistrationRequestWhereInput = {
+      ...(status ? { status } : {}),
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: 'insensitive' as const } },
+              { email: { contains: q, mode: 'insensitive' as const } },
+              { rollNo: { contains: q, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}),
+    };
+    const [rows, total, pending, approved, rejected] = await prisma.$transaction([
+      prisma.registrationRequest.findMany({
+        where,
+        select: registrationSelect,
+        orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+        skip: pagination.skip,
+        take: pagination.limit,
+      }),
+      prisma.registrationRequest.count({ where }),
+      prisma.registrationRequest.count({ where: { status: 'PENDING' } }),
+      prisma.registrationRequest.count({ where: { status: 'APPROVED' } }),
+      prisma.registrationRequest.count({ where: { status: 'REJECTED' } }),
+    ]);
+    const counts = { PENDING: pending, APPROVED: approved, REJECTED: rejected };
+    return sendData(res, rows, {
+      meta: { page: pagination.page, limit: pagination.limit, total, counts },
+    });
+  })
+);
+
+router.post(
+  '/registration-requests/:id/approve',
+  adminOnly,
+  validate(z.object({ id: z.string().uuid() }), 'params'),
+  asyncHandler(async (req, res) => {
+    const id = String(req.params.id);
+    const request = await prisma.registrationRequest.findUnique({ where: { id } });
+    if (!request) throw notFound('Registration request');
+    if (request.status !== 'PENDING') throw conflict('This application has already been reviewed');
+
+    if (request.role === 'STUDENT' && (!request.rollNo || !request.programId)) {
+      throw conflict('This application is missing a roll number or programme and cannot be approved');
+    }
+    if (request.role === 'TUTOR' && !request.departmentId) {
+      throw conflict('This application is missing a department and cannot be approved');
+    }
+
+    const [existingUser, existingRoll] = await Promise.all([
+      prisma.user.findUnique({ where: { email: request.email }, select: { id: true } }),
+      request.rollNo
+        ? prisma.studentProfile.findUnique({ where: { rollNo: request.rollNo }, select: { id: true } })
+        : Promise.resolve(null),
+    ]);
+    if (existingUser) throw conflict('An account with this email already exists');
+    if (existingRoll) throw conflict('That roll number is already registered');
+
+    const created = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          name: request.name,
+          email: request.email,
+          passwordHash: request.passwordHash,
+          role: request.role,
+          departmentId: request.departmentId,
+          employeeNo: request.employeeNo,
+          isActive: true,
+          ...(request.role === 'STUDENT' && request.rollNo && request.programId
+            ? {
+                studentProfile: {
+                  create: {
+                    rollNo: request.rollNo,
+                    programId: request.programId,
+                    batch: request.batch,
+                  },
+                },
+              }
+            : {}),
+        },
+        select: { id: true, name: true, email: true, role: true },
+      });
+      await tx.registrationRequest.update({
+        where: { id: request.id },
+        data: {
+          status: 'APPROVED',
+          reviewedById: req.user!.id,
+          reviewedAt: new Date(),
+          createdUserId: user.id,
+          decisionNote: null,
+        },
+      });
+      return user;
+    });
+
+    await audit(req, {
+      action: 'APPROVE',
+      entityType: 'RegistrationRequest',
+      entityId: request.id,
+      metadata: { email: request.email, role: request.role, userId: created.id },
+    });
+    await notify({
+      userIds: [created.id],
+      type: 'SYSTEM',
+      title: 'Account approved',
+      body: 'Your access request was approved. You can now sign in with the password you chose.',
+      link: '/',
+    });
+
+    return sendData(res, { requestId: request.id, user: created });
+  })
+);
+
+router.post(
+  '/registration-requests/:id/reject',
+  adminOnly,
+  validate(z.object({ id: z.string().uuid() }), 'params'),
+  validate(z.object({ reason: z.string().trim().min(3, 'Give a short reason').max(500) })),
+  asyncHandler(async (req, res) => {
+    const id = String(req.params.id);
+    const request = await prisma.registrationRequest.findUnique({ where: { id } });
+    if (!request) throw notFound('Registration request');
+    if (request.status !== 'PENDING') throw conflict('This application has already been reviewed');
+
+    const row = await prisma.registrationRequest.update({
+      where: { id },
+      data: {
+        status: 'REJECTED',
+        decisionNote: req.body.reason,
+        reviewedById: req.user!.id,
+        reviewedAt: new Date(),
+      },
+      select: registrationSelect,
+    });
+    await audit(req, {
+      action: 'REJECT',
+      entityType: 'RegistrationRequest',
+      entityId: id,
+      metadata: { email: request.email, role: request.role },
+    });
+    return sendData(res, row);
   })
 );
 

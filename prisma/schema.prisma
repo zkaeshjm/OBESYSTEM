@@ -38,6 +38,12 @@ enum ApprovalStatus {
   REJECTED
 }
 
+enum RegistrationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum BloomLevel {
   REMEMBER
   UNDERSTAND
@@ -157,9 +163,44 @@ model User {
   actionPlans       ImprovementActionPlan[] @relation("PlanCreatedBy")
   createdPolicies   AttainmentPolicy[] @relation("PolicyCreatedBy")
   materials         CourseMaterial[] @relation("MaterialCreatedBy")
+  reviewedRegistrations RegistrationRequest[] @relation("RegistrationReviewedBy")
+  approvedRegistrations RegistrationRequest[] @relation("RegistrationCreatedUser")
 
   @@index([role, isActive])
   @@map("users")
+}
+
+// Self-service tutor/student sign-up. Nothing here grants access: a row only
+// becomes an account when an administrator approves it. The password is hashed
+// on submission so a plaintext secret is never stored, and the applicant cannot
+// sign in until the account exists.
+model RegistrationRequest {
+  id            String             @id @default(uuid()) @db.Uuid
+  name          String
+  email         String
+  passwordHash  String
+  role          Role
+  departmentId  String?            @db.Uuid
+  employeeNo    String?
+  rollNo        String?
+  programId     String?            @db.Uuid
+  batch         String?
+  status        RegistrationStatus @default(PENDING)
+  decisionNote  String?
+  reviewedById  String?            @db.Uuid
+  reviewedAt    DateTime?
+  createdUserId String?            @db.Uuid
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  department  Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  program     Program?    @relation(fields: [programId], references: [id], onDelete: SetNull)
+  reviewedBy  User?       @relation("RegistrationReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  createdUser User?       @relation("RegistrationCreatedUser", fields: [createdUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([email, status])
+  @@map("registration_requests")
 }
 
 model RefreshToken {
@@ -190,6 +231,7 @@ model Department {
 
   users     User[]
   programs  Program[]
+  registrationRequests RegistrationRequest[]
 
   @@map("departments")
 }
@@ -209,6 +251,7 @@ model Program {
   courses    Course[]
   plos       Plo[]
   students   StudentProfile[]
+  registrationRequests RegistrationRequest[]
 
   @@index([departmentId])
   @@map("programs")

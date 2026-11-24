@@ -17,6 +17,9 @@ import type {
   Plo,
   PloDrillDown,
   Program,
+  RegistrationListResponse,
+  RegistrationOptions,
+  RegistrationRequest,
   RosterProgressResponse,
   Semester,
   StudentProfile,
@@ -130,6 +133,23 @@ export const api = {
     request<{ data: { user: User } }>('PATCH', '/auth/me', { body }),
   changePassword: (currentPassword: string, newPassword: string) =>
     request('PATCH', '/auth/password', { body: { currentPassword, newPassword } }),
+
+  registrationOptions: () => request<{ data: RegistrationOptions }>('GET', '/auth/register/options'),
+  register: (body: Record<string, unknown>) =>
+    request<{ data: { request: { id: string; email: string; role: string; status: string }; message: string } }>(
+      'POST',
+      '/auth/register',
+      { body }
+    ),
+  registrationRequests: (query?: Record<string, QueryValue>) =>
+    request<RegistrationListResponse>('GET', '/registration-requests', { query }),
+  approveRegistration: (id: string) =>
+    request<{ data: { requestId: string; user: Pick<User, 'id' | 'name' | 'email' | 'role'> } }>(
+      'POST',
+      `/registration-requests/${id}/approve`
+    ),
+  rejectRegistration: (id: string, reason: string) =>
+    request<{ data: RegistrationRequest }>('POST', `/registration-requests/${id}/reject`, { body: { reason } }),
 
   dashboard: () => request<{ data: Record<string, unknown> }>('GET', '/dashboard'),
 

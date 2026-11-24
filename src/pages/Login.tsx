@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, GraduationCap, LockKeyhole, Mail, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../api/client';
@@ -113,6 +113,13 @@ export default function Login() {
               Sign in <ArrowRight size={14} />
             </Button>
           </form>
+
+          <p className="mt-4 text-center text-[11px] text-gray-500 md:text-left">
+            Need an account?{' '}
+            <Link to="/register" className="font-semibold text-gray-800 underline-offset-2 hover:underline">
+              Request tutor or student access
+            </Link>
+          </p>
 
           <div className="mt-6 border-t border-gray-100 pt-4">
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">Seeded demonstration accounts</p>

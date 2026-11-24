@@ -5,6 +5,7 @@ import {
   BookOpen,
   Building2,
   CalendarDays,
+  ClipboardList,
   FileBarChart2,
   GitMerge,
   GraduationCap,
@@ -70,6 +71,7 @@ const NAV_GROUPS: Array<{ heading: string; items: NavItem[] }> = [
     heading: 'Administration',
     items: [
       { to: '/users', label: 'Users & students', icon: Users, roles: ['ADMIN'] },
+      { to: '/registration-requests', label: 'Access requests', icon: ClipboardList, roles: ['ADMIN'] },
       { to: '/policies', label: 'Attainment policy', icon: Settings2, roles: ['ADMIN'] },
       { to: '/audit', label: 'Audit log', icon: ScrollText, roles: ['ADMIN'] },
     ],

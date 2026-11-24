@@ -29,6 +29,42 @@ export interface Permissions {
   viewReports: boolean;
 }
 
+export interface RegistrationOptions {
+  departments: Array<Pick<Department, 'id' | 'name' | 'code'>>;
+  programs: Array<Pick<Program, 'id' | 'name' | 'code' | 'departmentId'>>;
+}
+
+export type RegistrationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface RegistrationRequest {
+  id: string;
+  name: string;
+  email: string;
+  role: 'TUTOR' | 'STUDENT';
+  employeeNo?: string | null;
+  rollNo?: string | null;
+  batch?: string | null;
+  departmentId?: string | null;
+  programId?: string | null;
+  status: RegistrationStatus;
+  decisionNote?: string | null;
+  reviewedAt?: string | null;
+  createdAt: string;
+  department?: { id: string; name: string; code: string } | null;
+  program?: { id: string; name: string; code: string } | null;
+  reviewedBy?: { id: string; name: string } | null;
+}
+
+export interface RegistrationListResponse {
+  data: RegistrationRequest[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    counts: Record<RegistrationStatus, number>;
+  };
+}
+
 export interface Department {
   id: string;
   name: string;
